@@ -87,10 +87,9 @@ PageAttributeToGcdAttribute (
         "PageAttributeToGcdAttribute: PageAttributes:0x%lX not supported.\n",
         PageAttributes
         ));
-      ASSERT (0);
-      // The Global Coherency Domain (GCD) value is defined as a bit set.
-      // Returning 0 means no attribute has been set.
-      GcdAttributes = 0;
+      // Secondary boot: U-Boot page tables may have unsupported attributes.
+      // Continue with WB as default instead of asserting.
+      GcdAttributes = EFI_MEMORY_WB;
   }
 
   // Determine protection attributes

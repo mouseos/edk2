@@ -11,6 +11,32 @@
 
 ASM_FUNC(_ModuleEntryPoint)
 
+  // Secondary bootloader: disable MMU and caches left by U-Boot
+  mrs   x4, CurrentEL
+  lsr   x4, x4, #2
+  cmp   x4, #2
+  b.eq  _DisableMmuEL2
+  // EL1
+  mrs   x4, sctlr_el1
+  bic   x4, x4, #(1 << 0)   // M bit - MMU
+  bic   x4, x4, #(1 << 2)   // C bit - D-cache
+  msr   sctlr_el1, x4
+  isb
+  b     _MmuDisabled
+_DisableMmuEL2:
+  mrs   x4, sctlr_el2
+  bic   x4, x4, #(1 << 0)   // M bit - MMU
+  bic   x4, x4, #(1 << 2)   // C bit - D-cache
+  msr   sctlr_el2, x4
+  isb
+_MmuDisabled:
+  // Invalidate TLB and instruction cache
+  tlbi  alle2
+  tlbi  alle1
+  ic    iallu
+  dsb   sy
+  isb
+
   // Check if register assignment at handoff matches spec
   MOV64 (x4, 0x14a0fb10b)
   cmp   x1, x4
