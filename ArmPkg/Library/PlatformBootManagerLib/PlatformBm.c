@@ -21,6 +21,7 @@
 #include <Library/UefiLib.h>
 #include <Library/UefiRuntimeServicesTableLib.h>
 #include <Protocol/BootManagerPolicy.h>
+#include <Protocol/AbsolutePointer.h>
 #include <Protocol/DevicePath.h>
 #include <Protocol/EsrtManagement.h>
 #include <Protocol/GraphicsOutput.h>
@@ -29,7 +30,12 @@
 #include <Protocol/PciIo.h>
 #include <Protocol/PciRootBridgeIo.h>
 #include <Protocol/PlatformBootManager.h>
+#include <Protocol/SimplePointer.h>
+#include <Protocol/SimpleTextIn.h>
+#include <Protocol/SimpleTextInEx.h>
+#include <Protocol/UsbIo.h>
 #include <Guid/BootDiscoveryPolicy.h>
+#include <Guid/ConsoleInDevice.h>
 #include <Guid/EventGroup.h>
 #include <Guid/NonDiscoverableDevice.h>
 #include <Guid/TtyTerm.h>
@@ -393,6 +399,169 @@ AddOutput (
     __func__,
     ReportText
     ));
+}
+
+STATIC
+VOID
+ConnectConsoleInputHandles (
+  IN EFI_GUID  *ProtocolGuid
+  )
+{
+  EFI_STATUS  Status;
+  EFI_HANDLE  *Handles;
+  UINTN       HandleCount;
+  UINTN       Index;
+
+  Status = gBS->LocateHandleBuffer (
+                  ByProtocol,
+                  ProtocolGuid,
+                  NULL,
+                  &HandleCount,
+                  &Handles
+                  );
+  if (EFI_ERROR (Status)) {
+    return;
+  }
+
+  for (Index = 0; Index < HandleCount; Index++) {
+    gBS->ConnectController (
+           Handles[Index],
+           NULL,
+           NULL,
+           TRUE
+           );
+  }
+
+  FreePool (Handles);
+}
+
+STATIC
+VOID
+ConnectConsoleInputStack (
+  VOID
+  )
+{
+  //
+  // USB keyboard can produce SimpleTextIn during console discovery. Give
+  // ConPlatform and ConSplitter a second pass before BDS hotkeys/menu input.
+  //
+  ConnectConsoleInputHandles (&gEfiSimpleTextInProtocolGuid);
+  ConnectConsoleInputHandles (&gEfiConsoleInDeviceGuid);
+}
+
+STATIC
+BOOLEAN
+HandleHasProtocol (
+  IN EFI_HANDLE  Handle,
+  IN EFI_GUID    *ProtocolGuid
+  )
+{
+  VOID  *Protocol;
+
+  return !EFI_ERROR (gBS->HandleProtocol (Handle, ProtocolGuid, &Protocol));
+}
+
+STATIC
+BOOLEAN
+PreferConSplitterConsoleInput (
+  VOID
+  )
+{
+  EFI_STATUS                      Status;
+  EFI_HANDLE                      *Handles;
+  UINTN                           HandleCount;
+  UINTN                           Index;
+  BOOLEAN                         Selected;
+  EFI_SIMPLE_TEXT_INPUT_PROTOCOL  *TextIn;
+
+  Status = gBS->LocateHandleBuffer (
+                  ByProtocol,
+                  &gEfiSimpleTextInProtocolGuid,
+                  NULL,
+                  &HandleCount,
+                  &Handles
+                  );
+  if (EFI_ERROR (Status)) {
+    return FALSE;
+  }
+
+  Selected = FALSE;
+  for (Index = 0; Index < HandleCount; Index++) {
+    //
+    // The ConSplitter virtual input handle aggregates TextIn, TextInEx,
+    // SimplePointer, and AbsolutePointer. Physical USB/serial keyboards do not.
+    //
+    if (!HandleHasProtocol (Handles[Index], &gEfiSimpleTextInputExProtocolGuid) ||
+        !HandleHasProtocol (Handles[Index], &gEfiSimplePointerProtocolGuid) ||
+        !HandleHasProtocol (Handles[Index], &gEfiAbsolutePointerProtocolGuid))
+    {
+      continue;
+    }
+
+    Status = gBS->HandleProtocol (
+                    Handles[Index],
+                    &gEfiSimpleTextInProtocolGuid,
+                    (VOID **)&TextIn
+                    );
+    if (EFI_ERROR (Status)) {
+      continue;
+    }
+
+    gST->ConsoleInHandle = Handles[Index];
+    gST->ConIn           = TextIn;
+    Selected             = TRUE;
+    break;
+  }
+
+  FreePool (Handles);
+  return Selected;
+}
+
+STATIC
+VOID
+PreferUsbKeyboardConsoleInput (
+  VOID
+  )
+{
+  EFI_STATUS                      Status;
+  EFI_HANDLE                      *Handles;
+  UINTN                           HandleCount;
+  UINTN                           Index;
+  EFI_SIMPLE_TEXT_INPUT_PROTOCOL  *TextIn;
+
+  Status = gBS->LocateHandleBuffer (
+                  ByProtocol,
+                  &gEfiSimpleTextInProtocolGuid,
+                  NULL,
+                  &HandleCount,
+                  &Handles
+                  );
+  if (EFI_ERROR (Status)) {
+    return;
+  }
+
+  for (Index = 0; Index < HandleCount; Index++) {
+    if (!HandleHasProtocol (Handles[Index], &gEfiUsbIoProtocolGuid) ||
+        !HandleHasProtocol (Handles[Index], &gEfiSimpleTextInputExProtocolGuid))
+    {
+      continue;
+    }
+
+    Status = gBS->HandleProtocol (
+                    Handles[Index],
+                    &gEfiSimpleTextInProtocolGuid,
+                    (VOID **)&TextIn
+                    );
+    if (EFI_ERROR (Status)) {
+      continue;
+    }
+
+    gST->ConsoleInHandle = Handles[Index];
+    gST->ConIn           = TextIn;
+    break;
+  }
+
+  FreePool (Handles);
 }
 
 STATIC
@@ -1002,6 +1171,11 @@ PlatformBootManagerAfterConsole (
   UINTN                         PosX;
   UINTN                         PosY;
   EFI_INPUT_KEY                 Key;
+
+  ConnectConsoleInputStack ();
+  if (!PreferConSplitterConsoleInput ()) {
+    PreferUsbKeyboardConsoleInput ();
+  }
 
   FirmwareVerLength = StrLen (PcdGetPtr (PcdFirmwareVersionString));
 

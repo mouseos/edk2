@@ -76,17 +76,23 @@
   gEfiFileInfoGuid
   gEfiFileSystemInfoGuid
   gEfiFileSystemVolumeLabelInfoIdGuid
+  gEfiConsoleInDeviceGuid
   gEfiEndOfDxeEventGroupGuid
   gEfiTtyTermGuid
   gUefiShellFileGuid
 
 [Protocols]
   gEdkiiNonDiscoverableDeviceProtocolGuid
+  gEfiAbsolutePointerProtocolGuid
   gEfiBootManagerPolicyProtocolGuid
   gEfiDevicePathProtocolGuid
   gEfiGraphicsOutputProtocolGuid
   gEfiLoadedImageProtocolGuid
   gEfiPciRootBridgeIoProtocolGuid
+  gEfiSimplePointerProtocolGuid
   gEfiSimpleFileSystemProtocolGuid
+  gEfiSimpleTextInProtocolGuid
+  gEfiSimpleTextInputExProtocolGuid
+  gEfiUsbIoProtocolGuid
   gEsrtManagementProtocolGuid
   gPlatformBootManagerProtocolGuid
